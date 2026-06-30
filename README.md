@@ -1,0 +1,44 @@
+# TorchSig GUI
+
+From [TorchSig Issue 283](https://github.com/TorchDSP/torchsig/issues/283), there is a desire for a GUI to set up a configuration file.
+
+Example features
+
+* [ ] bandwidth on a per signal/signal-class basis
+* [ ] SNR on a per signal
+* [ ] FFT size
+* [ ] Number of IQ samples
+* [ ] Selection of signal or signal classes
+* [ ] Impairments
+* [ ] Transforms
+* [ ] Probability distributions per signal or per signal class
+* [ ] Probability distributions per number of signals (wideband case only)
+* [ ] Narrowband and/or wideband dataset to generate
+* [ ] Number of samples in the dataset
+* [ ] Sample Rate
+* [ ] Impairment Level
+* [ ] Where to save to file
+
+## Config
+
+Based on the example `yaml_dataset_example.ipynb` the main parts of save/load YAML is in `torchsig.utils.yaml` and `torchsig.utils.defaults`
+
+~~~python
+    from torchsig.utils.defaults import default_dataset
+    from torchsig.utils.yaml import save_dataset_yaml, load_dataset_yaml
+~~~
+
+~~~yaml
+    "seed": 12345678,
+    "target_labels":
+        - "2fsk"
+        - "2ask"
+    "dataset_metadata":
+        "fft_size": 256
+    "dataset_length": 2000
+    "impairment_level": 0
+    "output":
+        "representation": "iq" # "iq" or "spectrogram"
+    "signal_sampling":
+        "mode": "per_signal"    # "per_signal" or "per_family"
+~~~

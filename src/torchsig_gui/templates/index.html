@@ -1,0 +1,220 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>TorchSig Layout Matrix</title>
+    <script src="https://jsdelivr.net"></script>
+</head>
+<body class="bg-slate-900 text-slate-100 min-h-screen p-8">
+    <div class="max-w-4xl mx-auto bg-slate-800 p-6 rounded-xl shadow-lg border border-slate-700">
+        <h1 class="text-2xl font-bold mb-6 border-b border-slate-700 pb-2 text-sky-400">Dataset Configuration Portal</h1>
+
+        <form id="matrixForm" class="space-y-6">
+            <!-- Basic Setup Layout Row -->
+            <div class="grid grid-cols-1 md:grid-cols-3 gap-4 p-4 bg-slate-850 rounded-lg border border-slate-700">
+                <div>
+                    <label class="block text-xs uppercase tracking-wider text-slate-400 mb-1">Dataset Name</label>
+                    <input type="text" id="datasetName" value="TorchSig Custom Run" class="w-full bg-slate-900 border border-slate-700 rounded px-3 py-1.5 text-sm focus:outline-none focus:border-sky-500">
+                </div>
+                <div>
+                    <label class="block text-xs uppercase tracking-wider text-slate-400 mb-1">Format</label>
+                    <select id="representation" class="w-full bg-slate-900 border border-slate-700 rounded px-3 py-1.5 text-sm focus:outline-none focus:border-sky-500">
+                        <option value="iq">IQ (Time Domain)</option>
+                        <option value="spectrogram">Spectrogram (Frequency Domain)</option>
+                    </select>
+                </div>
+                <div>
+                    <label class="block text-xs uppercase tracking-wider text-slate-400 mb-1">Grouping Mode</label>
+                    <select id="samplingMode" class="w-full bg-slate-900 border border-slate-700 rounded px-3 py-1.5 text-sm focus:outline-none focus:border-sky-500">
+                        <option value="per_signal">Per Signal</option>
+                        <option value="per_family">Per Family</option>
+                    </select>
+                </div>
+            </div>
+
+            <!-- Configuration Grid Container -->
+            <div>
+                <div class="flex justify-between items-center mb-2">
+                    <h2 class="text-md font-semibold text-slate-300">Signal Class Tuning Profiles</h2>
+                    <div class="text-xs space-x-2">
+                        <button type="button" onclick="toggleAllCheckboxes(true)" class="text-sky-400 hover:underline">Select All</button>
+                        <span class="text-slate-600">|</span>
+                        <button type="button" onclick="toggleAllCheckboxes(false)" class="text-slate-400 hover:underline">Clear All</button>
+                    </div>
+                </div>
+
+                <div class="border border-slate-700 rounded-lg overflow-hidden bg-slate-900 max-h-96 overflow-y-auto">
+                    <table class="w-full text-left text-sm border-collapse">
+                        <thead class="bg-slate-800 text-slate-400 text-xs uppercase sticky top-0 tracking-wider">
+                            <tr>
+                                <th class="p-3 w-16 text-center">Include</th>
+                                <th class="p-3">Modulation / Class Profile</th>
+                                <th class="p-3 w-40">Min SNR (dB)</th>
+                                <th class="p-3 w-40">Max SNR (dB)</th>
+                            </tr>
+                        </thead>
+                        <tbody id="gridTableBody" class="divide-y divide-slate-800">
+                            <!-- Populated dynamically via script execution -->
+                        </tbody>
+                    </table>
+                </div>
+            </div>
+
+            <button type="submit" class="w-full bg-sky-600 hover:bg-sky-500 text-white font-medium py-2.5 rounded transition duration-200 shadow-md">
+                Build & Save Target Dataset Configuration
+            </button>
+        </form>
+
+        <div id="statusMessage" class="mt-4 hidden p-3 rounded text-sm font-medium"></div>
+    </div>
+
+    <script>
+        const samplingModeEl = document.getElementById('samplingMode');
+        const gridTableBodyEl = document.getElementById('gridTableBody');
+
+        // Dynamically requests backend list properties and designs rows
+        async function fetchGridData() {
+            const currentMode = samplingModeEl.value;
+            try {
+                const response = await fetch(`/api/v1/signal-grid-options?mode=${currentMode}`);
+                const data = await response.json();
+
+                gridTableBodyEl.innerHTML = '';
+
+                data.signals.forEach(sig => {
+                    const row = document.createElement('tr');
+                    row.className = "hover:bg-slate-850/50 transition-colors";
+                    row.innerHTML = `
+                        <td class="p-3 text-center">
+                            <input type="checkbox" class="sig-include rounded text-sky-600 border-slate-700 bg-slate-900 focus:ring-sky-500 w-4 h-4" ${sig.included ? 'checked' : ''} data-name="${sig.name}">
+                        </td>
+                        <td class="p-3 font-mono font-medium text-slate-300">${sig.name}</td>
+                        <td class="p-3">
+                            <input type="number" class="sig-snr-min w-full bg-slate-800 border border-slate-700 rounded px-2 py-1 text-xs focus:outline-none focus:border-sky-500" value="${sig.snr_min}" step="0.5">
+                        </td>
+                        <td class="p-3">
+                            <input type="number" class="sig-snr-max w-full bg-slate-800 border border-slate-700 rounded px-2 py-1 text-xs focus:outline-none focus:border-sky-500" value="${sig.snr_max}" step="0.5">
+                        </td>
+                    `;
+                    gridTableBodyEl.appendChild(row);
+                });
+            } catch (err) {
+                console.error("Critical grid generation tracking error:", err);
+            }
+        }
+
+        function toggleAllCheckboxes(checkedState) {
+            document.querySelectorAll('.sig-include').forEach(cb => cb.checked = checkedState);
+        }
+
+        samplingModeEl.addEventListener('change', fetchGridData);
+        window.addEventListener('DOMContentLoaded', fetchGridData);
+
+        // Gather table data state on form submission
+        // document.getElementById('matrixForm').addEventListener('submit', async (e) => {
+        //     e.preventDefault();
+
+        //     const rows = [];
+        //     gridTableBodyEl.querySelectorAll('tr').forEach(tr => {
+        //         const checkEl = tr.querySelector('.sig-include');
+        //         rows.push({
+        //             name: checkEl.getAttribute('data-name'),
+        //             included: checkEl.checked,
+        //             snr_min: parseFloat(tr.querySelector('.sig-snr-min').value),
+        //             snr_max: parseFloat(tr.querySelector('.sig-snr-max').value)
+        //         });
+        //     });
+
+        //     const payload = {
+        //         dataset_name: document.getElementById('datasetName').value,
+        //         representation: document.getElementById('representation').value,
+        //         sampling_mode: samplingModeEl.value,
+        //         signals_grid: rows
+        //     };
+
+        //     const statusDiv = document.getElementById('statusMessage');
+        //     try {
+        //         const response = await fetch('/api/v1/save-grid-config', {
+        //             method: 'POST',
+        //             headers: { 'Content-Type': 'application/json' },
+        //             body: JSON.stringify(payload)
+        //         });
+        //         const result = await response.json();
+        //         statusDiv.classList.remove('hidden', 'bg-red-900/50', 'text-red-200');
+        //         statusDiv.classList.add('bg-emerald-900/50', 'text-emerald-200');
+        //         statusDiv.innerText = result.message;
+        //     } catch (error) {
+        //         statusDiv.classList.remove('hidden', 'bg-emerald-900/50', 'text-emerald-200');
+        //         statusDiv.classList.add('bg-red-900/50', 'text-red-200');
+        //         statusDiv.innerText = "Failed to update configuration parameter definitions.";
+        //     }
+        // });
+        document.getElementById('matrixForm').addEventListener('submit', async (e) => {
+            e.preventDefault();
+
+            const rows = [];
+            gridTableBodyEl.querySelectorAll('tr').forEach(tr => {
+                const checkEl = tr.querySelector('.sig-include');
+                rows.push({
+                    name: checkEl.getAttribute('data-name'),
+                    included: checkEl.checked,
+                    snr_min: parseFloat(tr.querySelector('.sig-snr-min').value),
+                    snr_max: parseFloat(tr.querySelector('.sig-snr-max').value)
+                });
+            });
+
+            const payload = {
+                dataset_name: document.getElementById('datasetName').value,
+                representation: document.getElementById('representation').value,
+                sampling_mode: samplingModeEl.value,
+                signals_grid: rows
+            };
+
+            const statusDiv = document.getElementById('statusMessage');
+
+            try {
+                const response = await fetch('/api/v1/save-grid-config', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify(payload)
+                });
+
+                if (!response.ok) throw new Error("Server transmission error.");
+
+                // Extract raw data block context from backend stream output
+                const blob = await response.blob();
+
+                // Extract original filename context from incoming system header values
+                const contentDisposition = response.headers.get('Content-Disposition');
+                let filename = 'torchsig_config.yaml';
+                if (contentDisposition && contentDisposition.includes('filename=')) {
+                    filename = contentDisposition.split('filename=')[1];
+                }
+
+                // Create a temporary hidden anchor element to trigger the browser save dialog
+                const downloadUrl = window.URL.createObjectURL(blob);
+                const link = document.createElement('a');
+                link.href = downloadUrl;
+                link.download = filename;
+                document.body.appendChild(link);
+                link.click();
+
+                // Cleanup document workspace
+                document.body.removeChild(link);
+                window.URL.revokeObjectURL(downloadUrl);
+
+                statusDiv.classList.remove('hidden', 'bg-red-900/50', 'text-red-200');
+                statusDiv.classList.add('bg-emerald-900/50', 'text-emerald-200');
+                statusDiv.innerText = `Configuration saved to server drive and downloaded locally as: ${filename}`;
+
+            } catch (error) {
+                statusDiv.classList.remove('hidden', 'bg-emerald-900/50', 'text-emerald-200');
+                statusDiv.classList.add('bg-red-900/50', 'text-red-200');
+                statusDiv.innerText = "Error compiling and creating your configuration files.";
+            }
+        });
+
+    </script>
+</body>
+</html>

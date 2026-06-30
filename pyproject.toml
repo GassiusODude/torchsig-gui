@@ -1,0 +1,29 @@
+[project]
+name = "torchsig-gui"
+version = "0.1.0"
+description = "A FastAPI backend for visualizing and interacting with TorchSig datasets"
+readme = "README.md"
+requires-python = ">=3.10"
+dependencies = [
+    "fastapi>=0.110.0",
+    "uvicorn[standard]>=0.28.0",
+    "torchsig>=2.1.1",        # TorchSig is officially published on PyPI
+    "torch>=2.2.0",           # Handled seamlessly with PyTorch pipelines
+    "numpy>=1.24.0",
+    "pydantic>=2.6.0",
+]
+
+[build-system]
+requires = ["setuptools>=61.0.0", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[tool.setuptools]
+package-dir = {"" = "src"}
+packages = ["torchsig_gui"]
+
+[tool.setuptools.package-data]
+"torchsig_gui" = ["templates/*.html"]
+
+# Entry point shortcut allowing you to run: fastapi dev src/torchsig_gui/main.py
+[tool.fastapi]
+app = "torchsig_gui.main:app"
