@@ -28,18 +28,45 @@ class FullSignalConfig(BaseModel):
     output: OutputConfig = Field(default_factory=OutputConfig)
     signal_sampling: SignalSamplingConfig = Field(default_factory=SignalSamplingConfig)
 
+
 # Schema for granular modulation configuration rows
-class SignalRowConfig(BaseModel):
-    name: str
-    included: bool = False
-    snr_min: float = -20.0
-    snr_max: float = 30.0
+class DatasetMetadataIn(BaseModel):
+    sample_rate: int = 10000000
+    num_iq_samples_dataset: int = 4096
+    fft_size: int = 64
+    fft_stride: int = 64
+    num_signals_min: int = 1
+    num_signals_max: int = 1
+    cochannel_overlap_probability: float = 0.0
+    snr_db_min: float = 0.0
+    snr_db_max: float = 50.0
+    noise_power_db: float = 0.0
+    signal_duration_in_samples_min: int = 3276
+    signal_duration_in_samples_max: int = 4096
+    bandwidth_min: int = 2500000
+    bandwidth_max: int = 3333333
+    signal_center_freq_min: int = -2500000
+    signal_center_freq_max: int = 2499999
+    frequency_min: int = -2500000
+    frequency_max: int = 2499999
+    classes: List[str] = Field(default_factory=list)
+
 
 class FullDatasetConfigRequest(BaseModel):
-    dataset_name: str
-    representation: Literal["iq", "spectrogram"]
-    sampling_mode: Literal["per_signal", "per_family"]
-    signals_grid: List[SignalRowConfig]
+    # Root Parameters
+    schema_version: str = "2.1.1"
+    dataset_id: str
+    dataset_length: int = 114000
+    seed: int = 1234567893
+    impairment_level: int = 2
+
+    # Nested Object Configurations
+    representation: Literal["iq", "spectrogram"] = "iq"
+    sampling_mode: Literal["per_signal", "per_family"] = "per_signal"
+
+    # Incoming layout array from web-table
+    dataset_metadata: DatasetMetadataIn
+
 
 @router.post("/save-config")
 async def save_config(config: FullSignalConfig):
@@ -79,32 +106,42 @@ async def get_signal_grid_options(mode: str = "per_signal"):
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 
+
 @router.post("/save-grid-config")
 async def save_grid_config(payload: FullDatasetConfigRequest):
     try:
-        config_data = payload.model_dump()
+        # 3. Restructure payload back to your target flat & nested YAML schema
+        final_output = {
+            "schema_version": payload.schema_version,
+            "dataset_id": payload.dataset_id,
+            "dataset_length": payload.dataset_length,
+            "seed": payload.seed,
+            "impairment_level": payload.impairment_level,
+            "output": {
+                "representation": payload.representation
+            },
+            "signal_sampling": {
+                "mode": payload.sampling_mode
+            },
+            "dataset_metadata": payload.dataset_metadata.model_dump()
+        }
 
-        # Filter down the list to export only active signal choices
-        config_data["signals_grid"] = [s for s in config_data["signals_grid"] if s["included"]]
-
-        # 1. Generate prettified YAML string
+        # 4. Generate clean, prettified block YAML strings
         yaml_content = yaml.safe_dump(
-            config_data,
-            sort_keys=False,
-            default_flow_style=False,
-            indent=4
+            final_output,
+            sort_keys=False,           # Preserves the explicit sequence order
+            default_flow_style=False,  # Enforces block notation (no inline {} or [])
+            indent=2                   # Clean 2-space indentation
         )
 
-        # 2. Build filename from user input box entry
-        safe_filename = payload.dataset_name.strip().lower().replace(" ", "_") + ".yaml"
+        safe_filename = f"{payload.dataset_id.strip().lower().replace(' ', '_')}.yaml"
 
-        # 3. Return a direct Response with file-download headers
         return Response(
             content=yaml_content,
             media_type="application/x-yaml",
             headers={
                 "Content-Disposition": f"attachment; filename={safe_filename}",
-                "Access-Control-Expose-Headers": "Content-Disposition"  # Crucial for browser JS to read the filename
+                "Access-Control-Expose-Headers": "Content-Disposition"
             }
         )
 

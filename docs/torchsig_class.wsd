@@ -1,0 +1,46 @@
+@startuml
+package signals as "torchsig/signals/" {
+    package builder {
+        class BaseSignalGenerator
+        class ConcatSignalGenerator
+    }
+    package builders as "builders" {
+        class BaseMetadataFields {
+            sample_rate : float
+            bandwidth_min: float
+            bandwidth_max: float
+            signal_duration_in_samples_min: float
+            signal_duration_in_samples_max: float
+        }
+        package chripss {
+            class ChirpSSSignalGenerator
+        }
+        package const as "constellation" {
+            class ConstellationSignalGenerator {
+                required_metadata_fields : BaseMetadataFields
+                constellation_name : str
+            }
+        }
+        package fm as "fm" {
+            class FMSignalGenerator
+        }
+        package fsk as "fsk" {
+            class FSKSignalGenerator {
+                fsk_type : str
+                constellation_size : int
+            }
+        }
+        package ofdm as "ofdm" {
+            class OFDMSignalGenerator {
+                num_subcarriers : int
+            }
+        }
+        BaseSignalGenerator <|-- ChirpSSSignalGenerator
+        BaseSignalGenerator <|-- ConstellationSignalGenerator
+        BaseSignalGenerator <|-- FMSignalGenerator
+        BaseSignalGenerator <|-- FSKSignalGenerator
+        BaseSignalGenerator <|-- OFDMSignalGenerator
+    }
+}
+
+@enduml

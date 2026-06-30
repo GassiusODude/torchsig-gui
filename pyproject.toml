@@ -22,7 +22,7 @@ package-dir = {"" = "src"}
 packages = ["torchsig_gui"]
 
 [tool.setuptools.package-data]
-"torchsig_gui" = ["templates/*.html"]
+"torchsig_gui" = ["templates/*.html", "static/css/*.css", "static/js/*.js"]
 
 # Entry point shortcut allowing you to run: fastapi dev src/torchsig_gui/main.py
 [tool.fastapi]
