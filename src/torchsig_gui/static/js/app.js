@@ -53,6 +53,7 @@ matrixForm.addEventListener('submit', async (e) => {
         impairment_level: parseInt(document.getElementById('impairmentLevel').value),
         representation: document.getElementById('representation').value,
         sampling_mode: samplingModeEl.value,
+        target_labels: selectedClasses,
 
         // Dynamic mapping of webpage metadata configuration fields
         dataset_metadata: {
@@ -73,8 +74,7 @@ matrixForm.addEventListener('submit', async (e) => {
             signal_center_freq_min: -2500000, // Derived automatically based on custom spans
             signal_center_freq_max: 2499999,
             frequency_min: -2500000,
-            frequency_max: 2499999,
-            classes: selectedClasses
+            frequency_max: 2499999
         }
     };
 

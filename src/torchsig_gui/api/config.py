@@ -49,7 +49,7 @@ class DatasetMetadataIn(BaseModel):
     signal_center_freq_max: int = 2499999
     frequency_min: int = -2500000
     frequency_max: int = 2499999
-    classes: List[str] = Field(default_factory=list)
+
 
 
 class FullDatasetConfigRequest(BaseModel):
@@ -66,7 +66,7 @@ class FullDatasetConfigRequest(BaseModel):
 
     # Incoming layout array from web-table
     dataset_metadata: DatasetMetadataIn
-
+    target_labels: List[str] = Field(default_factory=list)
 
 @router.post("/save-config")
 async def save_config(config: FullSignalConfig):
@@ -123,7 +123,8 @@ async def save_grid_config(payload: FullDatasetConfigRequest):
             "signal_sampling": {
                 "mode": payload.sampling_mode
             },
-            "dataset_metadata": payload.dataset_metadata.model_dump()
+            "dataset_metadata": payload.dataset_metadata.model_dump(),
+            "target_labels": payload.target_labels
         }
 
         # 4. Generate clean, prettified block YAML strings
