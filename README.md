@@ -43,3 +43,27 @@ Based on the example `yaml_dataset_example.ipynb` the main parts of save/load YA
         "mode": "per_signal"    # "per_signal" or "per_family"
 ~~~
 
+# Running
+
+## Launching FastAPI Server - Configure
+
+Launch the server to use the webpage and configure your dataset. Click the `Build & Save Target Dataset Configuration` to save the output YAML.
+
+~~~bash
+    uvicorn.exe torchsig_gui.main:app
+~~~
+
+## Generate Data and Train Model
+
+~~~mermaid
+classDiagram
+
+class XCiT1d
+class XCitClassifier :
+
+~~~
+
+* XCiTClassifier(input_channels=2, num_classes, ds_method, ds_rate)
+  * Number of channels is set to 2 based on the `ComplexTo2D` transform.
+  * Number of signals -> number of classes
+* XCiT1D(model_name, pretrained, num_classes, in_chans,)
