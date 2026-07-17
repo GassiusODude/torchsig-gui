@@ -1,7 +1,7 @@
 #!/usr/bin/env python
 """
 """
-from argparse import ArgumentParser
+from argparse import ArgumentParser, Namespace
 import logging
 import os
 import pdb
@@ -20,21 +20,29 @@ logger = logging.getLogger(__name__)
 
 
 transforms = [ComplexTo2D()]
+batch_size = 4
 
+def gen_training_set(args : Namespace  ):
+    """
+    Generate into dataset a train subdirectory and validate
+    """
+    # load dataset config from YAML
+    # -----------------------------------------------------
+    my_dataset: TorchSigIterableDataset = load_dataset_yaml(args.yaml_file)
+    my_dataset.transforms = transforms
 
-def gen_training_set(args):
-    """Generate into dataset a train subdirectory and validate"""
-    dataset_iter = load_dataset_yaml(args.yaml_file)
-    # dataset_iter.set_transforms(transforms)
+    # extract class list from the config
+    class_list = my_dataset.class_names
 
-    class_list = dataset_iter.class_names
-
-    if not dataset_iter.validate_metadata_fields():
+    if not my_dataset.validate_metadata_fields():
         logger.error("Metadata fields failed.")
         raise RuntimeError("dataset metadata validator failed")
 
     train_dataloader = WorkerSeedingDataLoader(
-        dataset_iter, batch_size=4, collate_fn=default_collate
+        my_dataset, batch_size=batch_size,
+        # collate_fn=default_collate
+        collate_fn=lambda x: x
+
     )
 
     # Prepare a training set
@@ -57,19 +65,28 @@ def train_xcit_model(train_dataloader, class_list, num_epochs=1):
     num_classes = len(class_list)
     model = classifier_module.XCiTClassifier(
         input_channels=2, num_classes=num_classes,
-        xcit_version="nano_12_p16_224",
-        ds_method="downsample", ds_rate=1)
+        # xcit_version="nano_12_p16_224",
+        # ds_method="downsample", ds_rate=2
+    )
     summary(model)
     train_dataset = StaticTorchSigDataset(
-        root="dataset/train", target_labels=class_list, transform=ComplexTo2D())
+        root="dataset/train",
+        #target_labels=class_list
+        target_labels = ["class_index"]
+    )
 
     # 2. Create a standard PyTorch DataLoader for the actual training loop
-    actual_train_loader = DataLoader(
-        train_dataset,
-        batch_size=4,
-        shuffle=True,
-        num_workers=2
+    # actual_train_loader = DataLoader(
+    #     train_dataset,
+    #     batch_size=batch_size,
+    #     shuffle=True,
+    #     num_workers=2
+    # )
+
+    actual_train_loader = WorkerSeedingDataLoader(
+        train_dataset, batch_size=4, collate_fn=lambda x: x
     )
+    # NOTE: added "enable_checkpointing=False"
     trainer = pl.Trainer(
         limit_train_batches=50,
         limit_val_batches=5,
@@ -84,7 +101,7 @@ def train_xcit_model(train_dataloader, class_list, num_epochs=1):
 
 
 def test_model(model, class_list):
-    test_dataset = StaticTorchSigDataset(root=f"dataset/validate", target_labels=class_list, transform=ComplexTo2D())
+    test_dataset = StaticTorchSigDataset(root=f"dataset/validate", target_labels=["class_index"])
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
     data, class_index = test_dataset[0]

@@ -90,7 +90,7 @@ class XCiT1d(nn.Module):
 
         # Include the grouper Conv1d layer
         self.grouper = nn.Conv1d(W, n_features, kernel_size=1)
-        import pdb; pdb.set_trace()
+
         # Replace the patch embedding with a 1D version
         if ds_method == "downsample":
             self.backbone.patch_embed = ConvDownSampler(input_channels, W, ds_rate)
@@ -161,6 +161,19 @@ class FocalLoss(nn.Module):
         self.ignore_index = ignore_index
 
     def forward(self, inputs, targets):
+        # 1. Ensure targets match the input's processing device and type
+        if not isinstance(targets, torch.Tensor):
+            targets = torch.tensor(targets, dtype=torch.long, device=inputs.device)
+        else:
+            targets = targets.long().to(inputs.device)
+
+        # 2. Safe check: If targets are accidentally one-hot encoded or 2D, squeeze them
+        if targets.dim() > 1 and targets.size(1) == inputs.size(1):
+            targets = torch.argmax(targets, dim=1)
+        elif targets.dim() > 1:
+            targets = targets.squeeze()
+
+
         log_probs = F.log_softmax(inputs, dim=1)
         ce_loss = F.nll_loss(
             log_probs,
@@ -181,6 +194,10 @@ class FocalLoss(nn.Module):
 
 
 class XCiTClassifier(pl.LightningModule):
+    """
+    xcit_nano (128)
+    xcit_tiny (256)
+    """
     def __init__(
         self,
         input_channels: int,
@@ -212,14 +229,24 @@ class XCiTClassifier(pl.LightningModule):
         return self.model(x)
 
     def training_step(self, batch, batch_idx) -> torch.Tensor:
-        x, y = batch
-        x = x.float()
+        # x, y, *_ = batch
+        # import pdb; pdb.set_trace()
+        # x = x.float()
+        x_list = [torch.from_numpy(item[0]) for item in batch]
+        x = torch.stack(x_list).float()  # Stack list of tensors into a true batch tensor
+
+        # 2. Extract and stack the labels into a 1D tensor of shape [4]
+        y_list = [item[1] for item in batch]
+        y = torch.tensor(y_list, dtype=torch.long, device=x.device)
+
         logits = self(x)
         loss = self.criterion(logits, y)
         preds = torch.argmax(logits, dim=1)
         acc = (preds == y).float().mean()
-        self.log("train_loss", loss, on_step=False, on_epoch=True)
-        self.log("train_acc", acc, on_step=False, on_epoch=True)
+
+        current_batch_size = x.size(0)
+        self.log("train_loss", loss, on_step=False, on_epoch=True, batch_size=current_batch_size)
+        self.log("train_acc", acc, on_step=False, on_epoch=True, batch_size=current_batch_size)
 
         self.train_losses.append(loss.item())
         return loss

@@ -59,9 +59,10 @@ Launch the server to use the webpage and configure your dataset. Click the `Buil
 classDiagram
 
 class XCiT1d
-class XCitClassifier :
-
+class XCitClassifier
+XCiT1d o-- XCitClassifier
 ~~~
+
 
 * XCiTClassifier(input_channels=2, num_classes, ds_method, ds_rate)
   * Number of channels is set to 2 based on the `ComplexTo2D` transform.
