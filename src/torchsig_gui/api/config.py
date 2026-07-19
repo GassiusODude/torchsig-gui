@@ -51,7 +51,6 @@ class DatasetMetadataIn(BaseModel):
     frequency_max: int = 2499999
 
 
-
 class FullDatasetConfigRequest(BaseModel):
     # Root Parameters
     schema_version: str = "2.1.1"
@@ -66,7 +65,8 @@ class FullDatasetConfigRequest(BaseModel):
 
     # Incoming layout array from web-table
     dataset_metadata: DatasetMetadataIn
-    target_labels: List[str] = Field(default_factory=list)
+    class_list: List[str] = Field(default_factory=list)
+    target_labels: Literal["class_name", "class_index"] = "class_name"
 
 @router.post("/save-config")
 async def save_config(config: FullSignalConfig):
@@ -124,6 +124,7 @@ async def save_grid_config(payload: FullDatasetConfigRequest):
                 "mode": payload.sampling_mode
             },
             "dataset_metadata": payload.dataset_metadata.model_dump(),
+            "class_list": payload.class_list,
             "target_labels": payload.target_labels
         }
 

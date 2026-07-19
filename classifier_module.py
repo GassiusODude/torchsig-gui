@@ -163,21 +163,21 @@ class FocalLoss(nn.Module):
     def forward(self, inputs, targets):
         # 1. Ensure targets match the input's processing device and type
         if not isinstance(targets, torch.Tensor):
-            targets = torch.tensor(targets, dtype=torch.long, device=inputs.device)
+            _targets = torch.tensor(targets, dtype=torch.long, device=inputs.device)
         else:
-            targets = targets.long().to(inputs.device)
+            _targets = targets.long().to(inputs.device)
 
         # 2. Safe check: If targets are accidentally one-hot encoded or 2D, squeeze them
-        if targets.dim() > 1 and targets.size(1) == inputs.size(1):
-            targets = torch.argmax(targets, dim=1)
-        elif targets.dim() > 1:
-            targets = targets.squeeze()
-
+        if _targets.dim() > 1:
+            if targets.size(1) == inputs.size(1):
+                _targets = torch.argmax(_targets, dim=1)
+            else:
+                _targets = _targets.squeeze().view(-1)
 
         log_probs = F.log_softmax(inputs, dim=1)
         ce_loss = F.nll_loss(
             log_probs,
-            targets,
+            _targets,
             weight=self.alpha,
             reduction="none",
             ignore_index=self.ignore_index,
@@ -229,16 +229,12 @@ class XCiTClassifier(pl.LightningModule):
         return self.model(x)
 
     def training_step(self, batch, batch_idx) -> torch.Tensor:
-        # x, y, *_ = batch
-        # import pdb; pdb.set_trace()
-        # x = x.float()
         x_list = [torch.from_numpy(item[0]) for item in batch]
         x = torch.stack(x_list).float()  # Stack list of tensors into a true batch tensor
 
         # 2. Extract and stack the labels into a 1D tensor of shape [4]
         y_list = [item[1] for item in batch]
         y = torch.tensor(y_list, dtype=torch.long, device=x.device)
-
         logits = self(x)
         loss = self.criterion(logits, y)
         preds = torch.argmax(logits, dim=1)
@@ -252,14 +248,21 @@ class XCiTClassifier(pl.LightningModule):
         return loss
 
     def validation_step(self, batch, batch_idx) -> None:
-        x, y = batch
-        x = x.float()
+        # Same manual stacking logic because of the collate_fn=lambda x: x
+        x_list = [torch.from_numpy(item[0]) for item in batch]
+        x = torch.stack(x_list).float()
+
+        y_list = [item[1] for item in batch]
+        y = torch.tensor(y_list, dtype=torch.long, device=x.device)
+
         logits = self(x)
         loss = self.criterion(logits, y)
         preds = torch.argmax(logits, dim=1)
         acc = (preds == y).float().mean()
-        self.log("val_loss", loss, prog_bar=True)
-        self.log("val_acc", acc, prog_bar=True)
+
+        current_batch_size = x.size(0)
+        self.log("val_loss", loss, prog_bar=True, batch_size=current_batch_size)
+        self.log("val_acc", acc, prog_bar=True, batch_size=current_batch_size)
         self.val_losses.append(loss.item())
         self.val_accuracies.append(acc.item())
 

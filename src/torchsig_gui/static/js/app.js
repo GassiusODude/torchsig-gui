@@ -53,7 +53,8 @@ matrixForm.addEventListener('submit', async (e) => {
         impairment_level: parseInt(document.getElementById('impairmentLevel').value),
         representation: document.getElementById('representation').value,
         sampling_mode: samplingModeEl.value,
-        target_labels: selectedClasses,
+        class_list: selectedClasses,
+        target_labels: document.getElementById('targetLabels').value,
 
         // Dynamic mapping of webpage metadata configuration fields
         dataset_metadata: {
