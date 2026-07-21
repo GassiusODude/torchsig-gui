@@ -20,13 +20,13 @@ from torchsig.transforms.transforms import ComplexTo2D
 from torchsig.utils.data_loading import WorkerSeedingDataLoader
 from torchsig.utils.signal_building import lookup_signal_generator_by_string
 from torchsig.utils.writer import DatasetCreator
+from typing import Optional
 import yaml
 
 import classifier_module
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
-
 
 transforms = [ComplexTo2D()]
 batch_size = 4
@@ -43,16 +43,19 @@ def create_dataset_from_yaml_config(yaml_path : Path):
 
     This function will support a subset of signals and even signal families
     instead of all signals.
-
     """
+    # Load YAML dictionary
     yaml_dict : dict = {}
     with open(yaml_path) as yaml_file:
         yaml_dict = yaml.safe_load(yaml_file)
+
+    # Load config
     my_dataset_cfg : TorchSigDatasetConfig = load_config_from_yaml(yaml_path)
     logger.info(f"Dataset Id={my_dataset_cfg.dataset_id} of length = {my_dataset_cfg.dataset_length}")
     logger.info(f"{my_dataset_cfg.output_representation} {my_dataset_cfg.signal_sampling_mode}")
     logger.info(f"{my_dataset_cfg.dataset_metadata}")
 
+    # Initialize dataset
     ds = TorchSigIterableDataset(
         metadata=my_dataset_cfg.dataset_metadata,
         signal_generators=[],
@@ -61,10 +64,12 @@ def create_dataset_from_yaml_config(yaml_path : Path):
         seed=my_dataset_cfg.seed
     )
 
+    # NOTE: initialize classes based on the YAML dictionary
     logger.info(f"Class list = {yaml_dict.get("class_list", "all")}")
     for c_class in yaml_dict["class_list"]:
         c_gen = lookup_signal_generator_by_string(c_class)
         ds.add_signal_generator(c_gen, likelihood=1)
+
     if not ds.validate_metadata_fields():
         logger.error("Metadata fields failed.")
         raise RuntimeError("dataset metadata validator failed")
@@ -72,7 +77,7 @@ def create_dataset_from_yaml_config(yaml_path : Path):
     return yaml_dict, my_dataset_cfg, ds
 
 
-def gen_training_set(args : Namespace  ):
+def gen_training_set(args : Namespace):
     """
     Generate into dataset a train subdirectory and validate
     """
@@ -88,19 +93,23 @@ def gen_training_set(args : Namespace  ):
     # -----------------------------------------------------
     dc = DatasetCreator(
         dataloader=train_dataloader, root=f"dataset/train",
-        overwrite=True, dataset_length=1000)
+        overwrite=True, dataset_length=10000)
     dc.create()
 
     # Prepare a validation set
     # -----------------------------------------------------
     dc = DatasetCreator(
         dataloader=train_dataloader, root=f"dataset/validate",
-        overwrite=True, dataset_length=1000)
+        overwrite=True, dataset_length=10000)
     dc.create()
     return class_list, train_dataloader
 
 
-def train_xcit_model(train_dataloader, class_list, num_epochs=1, model_path=None):
+def train_xcit_model(
+        args: Namespace, class_list : list[str]):
+    """
+    Train the XCiT model for modulation classification
+    """
     # -----------------------------------------------------
     # Initialize model
     # -----------------------------------------------------
@@ -108,33 +117,42 @@ def train_xcit_model(train_dataloader, class_list, num_epochs=1, model_path=None
     model = classifier_module.XCiTClassifier(
         input_channels=2, num_classes=num_classes,
         # xcit_version="nano_12_p16_224",
-        # ds_method="downsample", ds_rate=2
+        ds_method=args.ds_type, ds_rate=args.ds_rate,
+        learning_rate=args.lr,
     )
     summary(model)
-    if model_path is not None and os.path.isfile(model_path):
-        model.load_state_dict(torch.load(model_path))
+
+    # NOTE: prepare the number of epochs (extend if loading previous checkpoint)
+    if args.model is not None and os.path.isfile(args.model):
+        # Load just the metadata loop dictionary from the checkpoint safely
+        checkpoint_meta = torch.load(args.model, map_location="cpu")
+        starting_epoch = checkpoint_meta.get("epoch", 0)
+        logger.info(f" Found existing checkpoint at epoch: {starting_epoch}")
+
+        # Add your requested incremental epochs to the current checkpoint level
+        num_epochs = starting_epoch + args.epochs
+    else:
+        num_epochs = args.epochs
+
+    # NOTE: if epochs is zero or skip training...return the loaded model
+    if num_epochs == 0 or args.skip_train:
+        return model
 
     # -----------------------------------------------------
     # Prepare training data
     # -----------------------------------------------------
     train_dataset = StaticTorchSigDataset(
-        root="dataset/train",
-        target_labels = ["class_index"]
-        # target_labels=target_labels
-        )
+        root="dataset/train", target_labels=["class_index"])
 
     actual_train_loader = WorkerSeedingDataLoader(
-        train_dataset, batch_size=4, collate_fn=lambda x: x
+        train_dataset, batch_size=args.batch, collate_fn=lambda x: x
     )
 
     # -----------------------------------------------------
     # Prepare validation data
     # -----------------------------------------------------
     valid_dataset = StaticTorchSigDataset(
-        root="dataset/validate",
-        target_labels = ["class_index"]
-        # target_labels=target_labels
-        )
+        root="dataset/validate", target_labels=["class_index"])
 
     actual_valid_loader = WorkerSeedingDataLoader(
         valid_dataset, batch_size=4, collate_fn=lambda x: x
@@ -145,18 +163,37 @@ def train_xcit_model(train_dataloader, class_list, num_epochs=1, model_path=None
         limit_train_batches=50,
         limit_val_batches=5,
         max_epochs=num_epochs,
-        check_val_every_n_epoch=5,
+        check_val_every_n_epoch=args.validate_period,
         accelerator="gpu" if torch.cuda.is_available() else "cpu",
         devices=1,
-        enable_checkpointing=False,
+        enable_checkpointing=True,
     )
 
-    trainer.fit(
-        model,
-        train_dataloaders=actual_train_loader,
-        val_dataloaders=actual_valid_loader)
-    return model
+    # -----------------------------------------------------
+    # Smart Load and Train
+    # -----------------------------------------------------
+    # Check if a Lightning checkpoint exists instead of raw state_dict
+    if args.model is not None and os.path.isfile(args.model):
+        logger.info(f"Resuming training from checkpoint: {args.model} with NEW LR: {args.lr}")
 
+        trainer.fit(
+            model,
+            train_dataloaders=actual_train_loader,
+            val_dataloaders=actual_valid_loader,
+            ckpt_path=args.model  # Resumes perfectly
+        )
+    else:
+        logger.info("Starting training from scratch...")
+        trainer.fit(
+            model,
+            train_dataloaders=actual_train_loader,
+            val_dataloaders=actual_valid_loader
+        )
+
+    # save checkpoint
+    trainer.save_checkpoint(args.model)
+
+    return model
 
 
 def test_model(model, class_list):
@@ -184,12 +221,15 @@ def test_model(model, class_list):
             pred = model(data)
 
             # choose the class with highest confidence
-            predicted_class = torch.argmax(pred).cpu().numpy()
-            actual_class = np.array(class_index, dtype=np.int64)
+            predicted_class : np.ndarray = torch.argmax(pred).cpu().numpy()
+            actual_class : np.ndarray = np.array(class_index, dtype=np.int64)
+            # logger.info(f"Predicted = {predicted_class}, Actual = {actual_class}")
 
-            all_preds.append(predicted_class[0])
-            all_targets.append(actual_class.item())
-
+            try:
+                all_preds.append(predicted_class.item())
+                all_targets.append(actual_class.item())
+            except Exception as e:
+                pdb.set_trace()
             if predicted_class == actual_class:
                 correct_predictions += 1
 
@@ -214,6 +254,12 @@ def main():
     parser.add_argument("yaml_file")
     parser.add_argument("--epochs", default=1, type=int, help="Number of epochs of training")
     parser.add_argument("--model", default="model.pt")
+    parser.add_argument("--skip_train", action="store_true")
+    parser.add_argument("--lr", default=1e-3, type=float, help="Learning rate")
+    parser.add_argument("--ds_rate", default=2, type=int, help="Downsample rate")
+    parser.add_argument("--ds_type", default="downsample", choices=["downsample", "chunk"])
+    parser.add_argument("--validate_period", default=5, type=int, help="Check validation every N epochs")
+    parser.add_argument("--batch", default=4, type=int, help="Size of batch")
     args = parser.parse_args()
 
     if not os.path.isfile(args.yaml_file):
@@ -223,18 +269,15 @@ def main():
     # =========================================================================
     # Generate Training dataset
     # =========================================================================
-    class_list, train_dataloader = gen_training_set(args)
+    class_list, _ = gen_training_set(args)
 
     # =========================================================================
     # Classifier
     # =========================================================================
-    model = train_xcit_model(train_dataloader, class_list, args.epochs, model_path=args.model)
-    # save model
-    torch.save(model.state_dict(), args.model)
-
+    model = train_xcit_model(args, class_list)
 
     test_model(model, class_list)
-    pdb.set_trace()
+
 
 if __name__ == "__main__":
     main()
