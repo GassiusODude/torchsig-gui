@@ -16,7 +16,8 @@ from torch.utils.data import default_collate, DataLoader
 from torchinfo import summary
 from torchsig.utils.yaml import load_dataset_yaml, load_config_from_yaml
 from torchsig.datasets.datasets import TorchSigIterableDataset, StaticTorchSigDataset, TorchSigDatasetConfig
-from torchsig.transforms.transforms import ComplexTo2D
+from torchsig.transforms.base_transforms import Normalize
+from torchsig.transforms.transforms import AWGN, ComplexTo2D
 from torchsig.utils.data_loading import WorkerSeedingDataLoader
 from torchsig.utils.signal_building import lookup_signal_generator_by_string
 from torchsig.utils.writer import DatasetCreator
@@ -28,11 +29,18 @@ import classifier_module
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
-transforms = [ComplexTo2D()]
+
 batch_size = 4
 class_list = []
+def tensor_collate(batch):
+    # batch = [(x1, y1), (x2, y2), ...]
+    # Stacks numpy arrays or tensors into a fast, unified contiguous block
+    x = torch.stack([torch.from_numpy(item[0]) for item in batch]).float()
+    y = torch.tensor([item[1] for item in batch], dtype=torch.long)
+    return x, y
 
-def create_dataset_from_yaml_config(yaml_path : Path):
+
+def create_dataset_from_yaml_config(yaml_path : Path, args : Namespace):
     """
     Custom load from YAML config to initialize the dataset
 
@@ -55,13 +63,30 @@ def create_dataset_from_yaml_config(yaml_path : Path):
     logger.info(f"{my_dataset_cfg.output_representation} {my_dataset_cfg.signal_sampling_mode}")
     logger.info(f"{my_dataset_cfg.dataset_metadata}")
 
+    # TODO: swap to something the user configures in the YAML
+    the_transforms = [
+        AWGN(noise_power_db = yaml_dict["dataset_metadata"]["noise_power_db"]),
+        Normalize(norm=2),
+        ComplexTo2D()
+    ]
+
+    # NOTE: this is changing the seed so that the data samples are not fixed.
+    #       This is only called once each time the script is run.
+    #       It uses the number of epochs already processed to reseed.
+    if args.model is not None and os.path.isfile(args.model):
+        # Load just the metadata loop dictionary from the checkpoint safely
+        checkpoint_meta = torch.load(args.model, map_location="cpu")
+        starting_epoch = checkpoint_meta.get("epoch", 0)
+    else:
+        starting_epoch = 0
+
     # Initialize dataset
     ds = TorchSigIterableDataset(
         metadata=my_dataset_cfg.dataset_metadata,
         signal_generators=[],
-        transforms=[ComplexTo2D()],
+        transforms=the_transforms,
         target_labels=yaml_dict["target_labels"],
-        seed=my_dataset_cfg.seed
+        seed=my_dataset_cfg.seed + starting_epoch
     )
 
     # NOTE: initialize classes based on the YAML dictionary
@@ -82,10 +107,11 @@ def gen_training_set(args : Namespace):
     Generate into dataset a train subdirectory and validate
     """
     ydict, my_dataset_cfg, my_dataset = create_dataset_from_yaml_config(
-        Path(os.path.abspath(args.yaml_file)))
+        Path(os.path.abspath(args.yaml_file)), args)
 
     class_list : list[str] = ydict["class_list"]
-
+    if len(class_list) > args.batch:
+        logger.warning(f"Batch size ({args.batch} is less than number of classes {len(class_list)})")
     train_dataloader = WorkerSeedingDataLoader(
         my_dataset, batch_size=batch_size, collate_fn=lambda x: x)
 
@@ -93,14 +119,14 @@ def gen_training_set(args : Namespace):
     # -----------------------------------------------------
     dc = DatasetCreator(
         dataloader=train_dataloader, root=f"dataset/train",
-        overwrite=True, dataset_length=10000)
+        overwrite=True, dataset_length=ydict["dataset_length"])
     dc.create()
 
     # Prepare a validation set
     # -----------------------------------------------------
     dc = DatasetCreator(
         dataloader=train_dataloader, root=f"dataset/validate",
-        overwrite=True, dataset_length=10000)
+        overwrite=True, dataset_length=ydict["dataset_length"])
     dc.create()
     return class_list, train_dataloader
 
@@ -145,7 +171,11 @@ def train_xcit_model(
         root="dataset/train", target_labels=["class_index"])
 
     actual_train_loader = WorkerSeedingDataLoader(
-        train_dataset, batch_size=args.batch, collate_fn=lambda x: x
+        train_dataset, batch_size=args.batch,
+        # collate_fn=lambda x: x,
+        collate_fn=tensor_collate,
+        shuffle=True,
+        pin_memory=True, num_workers=4, persistent_workers=True
     )
 
     # -----------------------------------------------------
@@ -155,7 +185,10 @@ def train_xcit_model(
         root="dataset/validate", target_labels=["class_index"])
 
     actual_valid_loader = WorkerSeedingDataLoader(
-        valid_dataset, batch_size=4, collate_fn=lambda x: x
+        valid_dataset, batch_size=args.batch,
+        #   collate_fn=lambda x: x,
+        collate_fn=tensor_collate,
+        pin_memory=True, num_workers=4, persistent_workers=True
     )
 
     # NOTE: added "enable_checkpointing=False"
@@ -197,11 +230,11 @@ def train_xcit_model(
 
 
 def test_model(model, class_list):
+    """
+    Run tests on the model
+    """
     test_dataset = StaticTorchSigDataset(
-        root=f"dataset/validate",
-        target_labels=["class_index"],
-        # target_labels = class_list
-    )
+        root=f"dataset/validate", target_labels=["class_index"])
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
     model.to(device)
@@ -223,13 +256,13 @@ def test_model(model, class_list):
             # choose the class with highest confidence
             predicted_class : np.ndarray = torch.argmax(pred).cpu().numpy()
             actual_class : np.ndarray = np.array(class_index, dtype=np.int64)
-            # logger.info(f"Predicted = {predicted_class}, Actual = {actual_class}")
 
             try:
                 all_preds.append(predicted_class.item())
                 all_targets.append(actual_class.item())
             except Exception as e:
                 pdb.set_trace()
+
             if predicted_class == actual_class:
                 correct_predictions += 1
 
@@ -259,7 +292,7 @@ def main():
     parser.add_argument("--ds_rate", default=2, type=int, help="Downsample rate")
     parser.add_argument("--ds_type", default="downsample", choices=["downsample", "chunk"])
     parser.add_argument("--validate_period", default=5, type=int, help="Check validation every N epochs")
-    parser.add_argument("--batch", default=4, type=int, help="Size of batch")
+    parser.add_argument("--batch", default=50, type=int, help="Size of batch")
     args = parser.parse_args()
 
     if not os.path.isfile(args.yaml_file):

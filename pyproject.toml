@@ -11,6 +11,9 @@ dependencies = [
     "torch>=2.2.0",           # Handled seamlessly with PyTorch pipelines
     "numpy>=1.24.0",
     "pydantic>=2.6.0",
+    "scikit-learn",
+    "timm",
+    "torch_info",
 ]
 
 [build-system]

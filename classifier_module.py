@@ -1,3 +1,4 @@
+import pdb
 import pytorch_lightning as pl
 import torch
 import torch.nn as nn
@@ -38,6 +39,7 @@ class Chunker(nn.Module):
         self.pool = nn.AvgPool1d(kernel_size=ds_rate, stride=ds_rate)
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
+
         x = self.embed(x)  # Shape: [B, embed_dim, L]
         x = self.pool(x)  # Downsample by averaging
         return x
@@ -92,24 +94,25 @@ class XCiT1d(nn.Module):
         self.grouper = nn.Conv1d(W, n_features, kernel_size=1)
 
         # Replace the patch embedding with a 1D version
+        self.backbone.head = nn.Identity()
+
         if ds_method == "downsample":
-            self.backbone.patch_embed = ConvDownSampler(input_channels, W, ds_rate)
+            self.patch_embed = ConvDownSampler(input_channels, W, ds_rate)
         elif ds_method == "chunk":
-            self.backbone.patch_embed = Chunker(input_channels, W, ds_rate)
+            self.patch_embed = Chunker(input_channels, W, ds_rate)
         else:
             raise ValueError(
                 f"{ds_method} is not a supported downsampling method; currently 'downsample' and 'chunk' are supported"
             )
+        self.backbone.patch_embed = self.patch_embed
 
-        # Replace the classifier head with an identity layer (since we use self.grouper)
-        self.backbone.head = nn.Identity()
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
         mdl = self.backbone
         B = x.shape[0]
 
         # Patch embedding
-        x = self.backbone.patch_embed(x)  # Shape: [B, C, L]
+        x = self.patch_embed(x)  # Shape: [B, C, L]
 
         # Define H and W for 1D data
         Hp, Wp = x.shape[-1], 1  # Height is sequence length, Width is 1
@@ -209,6 +212,7 @@ class XCiTClassifier(pl.LightningModule):
     ):
         super().__init__()
         self.save_hyperparameters()
+
         self.model = XCiT1d(
             input_channels=input_channels,
             n_features=num_classes,
@@ -229,12 +233,8 @@ class XCiTClassifier(pl.LightningModule):
         return self.model(x)
 
     def training_step(self, batch, batch_idx) -> torch.Tensor:
-        x_list = [torch.from_numpy(item[0]) for item in batch]
-        x = torch.stack(x_list).float()  # Stack list of tensors into a true batch tensor
+        x, y = batch
 
-        # 2. Extract and stack the labels into a 1D tensor of shape [4]
-        y_list = [item[1] for item in batch]
-        y = torch.tensor(y_list, dtype=torch.long, device=x.device)
         logits = self(x)
         loss = self.criterion(logits, y)
         preds = torch.argmax(logits, dim=1)
@@ -248,12 +248,7 @@ class XCiTClassifier(pl.LightningModule):
         return loss
 
     def validation_step(self, batch, batch_idx) -> None:
-        # Same manual stacking logic because of the collate_fn=lambda x: x
-        x_list = [torch.from_numpy(item[0]) for item in batch]
-        x = torch.stack(x_list).float()
-
-        y_list = [item[1] for item in batch]
-        y = torch.tensor(y_list, dtype=torch.long, device=x.device)
+        x, y = batch
 
         logits = self(x)
         loss = self.criterion(logits, y)

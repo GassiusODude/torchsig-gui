@@ -4,20 +4,20 @@ From [TorchSig Issue 283](https://github.com/TorchDSP/torchsig/issues/283), ther
 
 Example features
 
-* [ ] bandwidth on a per signal/signal-class basis
-* [ ] SNR on a per signal
-* [ ] FFT size
-* [ ] Number of IQ samples
-* [ ] Selection of signal or signal classes
+* Per Signal
+  * [ ] bandwidth on a per signal/signal-class basis
+  * [ ] SNR on a per signal
+* [x] FFT size
+* [x] Number of IQ samples
+* [x] Selection of signal or signal classes
 * [ ] Impairments
 * [ ] Transforms
 * [ ] Probability distributions per signal or per signal class
 * [ ] Probability distributions per number of signals (wideband case only)
-* [ ] Narrowband and/or wideband dataset to generate
-* [ ] Number of samples in the dataset
-* [ ] Sample Rate
-* [ ] Impairment Level
-* [ ] Where to save to file
+* [x] Narrowband and/or wideband dataset to generate
+* [x] Number of samples in the dataset
+* [x] Sample Rate
+* [x] Impairment Level
 
 ## Config
 
@@ -63,8 +63,13 @@ class XCitClassifier
 XCiT1d o-- XCitClassifier
 ~~~
 
-
 * XCiTClassifier(input_channels=2, num_classes, ds_method, ds_rate)
   * Number of channels is set to 2 based on the `ComplexTo2D` transform.
   * Number of signals -> number of classes
 * XCiT1D(model_name, pretrained, num_classes, in_chans,)
+
+~~~bash
+    python .\script_gen_dataset.py family.yaml
+        --lr 1e-4 --validate_period 5 --epochs 20
+        --ds_type chunk --ds_rate 8 --model model.ckpt
+~~~
