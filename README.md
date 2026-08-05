@@ -1,24 +1,5 @@
 # TorchSig GUI
 
-From [TorchSig Issue 283](https://github.com/TorchDSP/torchsig/issues/283), there is a desire for a GUI to set up a configuration file.
-
-Example features
-
-* Per Signal
-  * [ ] bandwidth on a per signal/signal-class basis
-  * [ ] SNR on a per signal
-* [x] FFT size
-* [x] Number of IQ samples
-* [x] Selection of signal or signal classes
-* [ ] Impairments
-* [ ] Transforms
-* [ ] Probability distributions per signal or per signal class
-* [ ] Probability distributions per number of signals (wideband case only)
-* [x] Narrowband and/or wideband dataset to generate
-* [x] Number of samples in the dataset
-* [x] Sample Rate
-* [x] Impairment Level
-
 ## Config
 
 Based on the example `yaml_dataset_example.ipynb` the main parts of save/load YAML is in `torchsig.utils.yaml` and `torchsig.utils.defaults`
@@ -51,6 +32,18 @@ Launch the server to use the webpage and configure your dataset. Click the `Buil
 
 ~~~bash
     uvicorn.exe torchsig_gui.main:app
+~~~
+
+## Streamlit
+
+~~~bash
+    # Installing Streamlit
+    python -m venv venv
+    source venv/bin/activate  # Linux
+    python -m pip install streamlit
+
+    # Running Streamlit
+    streamlit run .\src\torchsig_gui\sl_main.py
 ~~~
 
 ## Generate Data and Train Model
