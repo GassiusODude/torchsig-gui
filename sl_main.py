@@ -1,5 +1,5 @@
 import streamlit as st
-from pydantic import BaseModel, Field, ValidationError
+from pydantic import BaseModel, Field, ValidationError, model_validator
 from typing import Dict, Any, List, Literal, Optional
 import yaml
 
@@ -46,6 +46,44 @@ class DatasetMetadataIn(BaseModel):
     frequency_min: int = -2500000
     frequency_max: int = 2499999
 
+    @model_validator(mode="after")
+    def validate_bounds_and_constraints(self) -> "DatasetMetadataIn":
+        if self.num_signals_min > self.num_signals_max:
+            raise ValueError(f"num_signals_min ({self.num_signals_min}) must be less than or equal to num_signals_max ({self.num_signals_max})")
+        if self.snr_db_min > self.snr_db_max:
+            raise ValueError(f"snr_db_min ({self.snr_db_min}) must be less than or equal to snr_db_max ({self.snr_db_max})")
+        if self.signal_duration_in_samples_min > self.signal_duration_in_samples_max:
+            raise ValueError(f"signal_duration_in_samples_min ({self.signal_duration_in_samples_min}) must be less than or equal to signal_duration_in_samples_max ({self.signal_duration_in_samples_max})")
+        if self.bandwidth_min > self.bandwidth_max:
+            raise ValueError(f"bandwidth_min ({self.bandwidth_min}) must be less than or equal to bandwidth_max ({self.bandwidth_max})")
+        if self.signal_center_freq_min > self.signal_center_freq_max:
+            raise ValueError(f"signal_center_freq_min ({self.signal_center_freq_min}) must be less than or equal to signal_center_freq_max ({self.signal_center_freq_max})")
+        if self.frequency_min > self.frequency_max:
+            raise ValueError(f"frequency_min ({self.frequency_min}) must be less than or equal to frequency_max ({self.frequency_max})")
+
+        # Bandwidth constraint: bandwidth must be constrained by sample_rate (e.g. max bandwidth <= sample_rate)
+        if self.bandwidth_max > self.sample_rate:
+            raise ValueError(f"bandwidth_max ({self.bandwidth_max}) cannot exceed sample_rate ({self.sample_rate})")
+        if self.bandwidth_min > self.sample_rate:
+            raise ValueError(f"bandwidth_min ({self.bandwidth_min}) cannot exceed sample_rate ({self.sample_rate})")
+
+        # Spectral occupancy constraints based on center frequency bounds and max bandwidth
+        nyquist_min = -self.sample_rate / 2.0
+        nyquist_max = self.sample_rate / 2.0
+
+        if (self.signal_center_freq_min - self.bandwidth_max / 2.0) <= nyquist_min:
+            raise ValueError(
+                f"signal_center_freq_min - bandwidth_max / 2 ({self.signal_center_freq_min - self.bandwidth_max / 2.0}) "
+                f"must be strictly greater than - sample_rate / 2 ({nyquist_min})"
+            )
+        if (self.signal_center_freq_max + self.bandwidth_max / 2.0) >= nyquist_max:
+            raise ValueError(
+                f"signal_center_freq_max + bandwidth_max / 2 ({self.signal_center_freq_max + self.bandwidth_max / 2.0}) "
+                f"must be strictly less than sample_rate / 2 ({nyquist_max})"
+            )
+
+        return self
+
 class FullDatasetConfigRequest(BaseModel):
     schema_version: str = "2.1.1"
     dataset_id: str
@@ -57,6 +95,18 @@ class FullDatasetConfigRequest(BaseModel):
     dataset_metadata: DatasetMetadataIn
     class_list: List[str] = Field(default_factory=list)
     target_labels: Literal["class_name", "class_index"] = "class_name"
+
+    @model_validator(mode="after")
+    def validate_class_list_not_empty_and_valid(self) -> "FullDatasetConfigRequest":
+        if not self.class_list:
+            raise ValueError("class_list cannot be empty. Please include at least one signal or family.")
+        
+        allowed_list = FAMILY_SHARED_LIST if self.sampling_mode == "per_family" else SIGNALS_SHARED_LIST
+        invalid_classes = [c for c in self.class_list if c not in allowed_list]
+        if invalid_classes:
+            raise ValueError(f"Invalid classes for sampling_mode '{self.sampling_mode}': {invalid_classes}. Allowed list: {allowed_list}")
+        
+        return self
 
 # --- Sidebar: Core Metadata & Generation Params ---
 st.sidebar.header("📁 Root Specifications")
@@ -125,7 +175,7 @@ with col1:
         },
         disabled=["name", "snr_min", "snr_max"],
         hide_index=True,
-        use_container_width=True
+        width="stretch"
     )
 
 with col2:
@@ -203,6 +253,14 @@ with col2:
     st.subheader("Live Structure Target Preview")
     if validation_error:
         st.error(f"❌ Structural Validation Error: {validation_error}")
+        st.download_button(
+            label="💾 Download Generated YAML File",
+            data="",
+            file_name="disabled.yaml",
+            mime="application/x-yaml",
+            width="stretch",
+            disabled=True
+        )
     else:
         st.code(yaml_content, language="yaml")
 
@@ -215,5 +273,5 @@ with col2:
             data=yaml_content,
             file_name=safe_filename,
             mime="application/x-yaml",
-            use_container_width=True
+            width="stretch"
         )
